@@ -13,6 +13,19 @@ const PORT = 3000;
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
+// Normalization middleware for Vercel Serverless rewrites
+app.use((req, res, next) => {
+  const original = (req.headers["x-matched-path"] || req.headers["x-forwarded-uri"] || req.headers["x-invoke-path"]) as string | undefined;
+  if (original && typeof original === "string" && original.startsWith("/api")) {
+    const qIdx = req.url.indexOf("?");
+    const query = qIdx !== -1 ? req.url.substring(qIdx) : "";
+    req.url = original + (original.includes("?") ? "" : query);
+  } else if (!req.url.startsWith("/api")) {
+    req.url = "/api" + (req.url.startsWith("/") ? req.url : "/" + req.url);
+  }
+  next();
+});
+
 // Auto-verify and ensure users and forms tables exist on startup
 async function ensureDatabaseSchema() {
   try {
@@ -72,17 +85,45 @@ ensureDatabaseSchema();
 
 app.get("/api/health", async (req, res) => {
   let dbStatus = "connected";
+  let dbError = null;
   try {
     const [rows] = await dbPool.query("SELECT 1 as val");
-  } catch (e) {
+  } catch (e: any) {
     dbStatus = "error";
+    dbError = e?.message || String(e);
   }
+
+  const hasDbEnv = !!(
+    process.env.DATABASE_URL ||
+    process.env.DATABASE ||
+    process.env.DATABSE ||
+    process.env.DATABASE_URI ||
+    process.env.MYSQL_URL ||
+    process.env.TIDB_URL ||
+    process.env.DB_URL
+  );
+
+  const hasGroqEnv = !!(
+    process.env.GROQ_API_KEY ||
+    process.env.APIKEY ||
+    process.env.API_KEY ||
+    process.env.GROQ_KEY ||
+    process.env.GROQ_APIKEY
+  );
+
   res.json({
     status: "ok",
     database: dbPool.isMock ? "In-Memory Store (Sandbox)" : "MySQL/TiDB Cloud",
     databaseName: "deform",
     databaseStatus: dbStatus,
-    groqEnabled: !!process.env.GROQ_API_KEY,
+    databaseError: dbError,
+    groqEnabled: hasGroqEnv,
+    environmentConfig: {
+      databaseUrlDetected: hasDbEnv,
+      groqApiKeyDetected: hasGroqEnv,
+      nodeEnv: process.env.NODE_ENV || "development",
+      isVercel: !!process.env.VERCEL,
+    },
     timestamp: new Date().toISOString(),
     phase: "Phase 2: Ingestion & Parsing Engine",
   });
@@ -115,7 +156,14 @@ app.post("/api/ai/analyze-form", async (req, res) => {
 // POST /api/ai/suggest - Groq AI Assistant for form fields and descriptions
 app.post("/api/ai/suggest", async (req, res) => {
   const { prompt, context } = req.body;
-  if (!process.env.GROQ_API_KEY) {
+  const groqKey =
+    process.env.GROQ_API_KEY ||
+    process.env.APIKEY ||
+    process.env.API_KEY ||
+    process.env.GROQ_KEY ||
+    process.env.GROQ_APIKEY;
+
+  if (!groqKey) {
     return res.status(503).json({ error: "GROQ_API_KEY is not configured in environment" });
   }
 
@@ -623,4 +671,8 @@ async function startServer() {
   });
 }
 
-startServer();
+if (!process.env.VERCEL) {
+  startServer();
+}
+
+export default app;

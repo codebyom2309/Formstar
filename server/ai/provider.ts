@@ -35,9 +35,15 @@ export class UniversalAIProvider implements AIProvider {
   private geminiModel: string = "gemini-3.6-flash";
 
   constructor() {
-    this.groqApiKey = process.env.GROQ_API_KEY || "";
-    if (process.env.GEMINI_API_KEY) {
-      this.geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+    this.groqApiKey =
+      process.env.GROQ_API_KEY ||
+      process.env.APIKEY ||
+      process.env.API_KEY ||
+      process.env.GROQ_KEY ||
+      process.env.GROQ_APIKEY ||
+      "";
+    if (process.env.GEMINI_API_KEY || process.env.GEMINI_KEY) {
+      this.geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || process.env.GEMINI_KEY || "" });
     }
   }
 

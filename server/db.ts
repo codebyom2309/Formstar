@@ -700,20 +700,31 @@ const memoryDb = new InMemoryDatabase();
 let realPool: mysql.Pool | null = null;
 let useRealDb = false;
 
-// If DATABASE_URL is explicitly set and points to an external host, try connecting with strict timeout
-if (process.env.DATABASE_URL) {
+export const resolvedDbUrl =
+  process.env.DATABASE_URL ||
+  process.env.DATABASE ||
+  process.env.DATABSE ||
+  process.env.DATABASE_URI ||
+  process.env.MYSQL_URL ||
+  process.env.TIDB_URL ||
+  process.env.DB_URL ||
+  "";
+
+if (resolvedDbUrl) {
   try {
     const isCloudDb =
-      process.env.DATABASE_URL.includes("tidbcloud.com") ||
-      process.env.DATABASE_URL.includes("aws") ||
-      process.env.DATABASE_URL.includes("ssl");
+      resolvedDbUrl.includes("tidbcloud.com") ||
+      resolvedDbUrl.includes("aws") ||
+      resolvedDbUrl.includes("ssl");
 
     realPool = mysql.createPool({
-      uri: process.env.DATABASE_URL,
+      uri: resolvedDbUrl,
       waitForConnections: true,
-      connectionLimit: 10,
+      connectionLimit: 5,
       queueLimit: 0,
       connectTimeout: 10000,
+      enableKeepAlive: true,
+      keepAliveInitialDelay: 0,
       ssl: isCloudDb ? { minVersion: "TLSv1.2", rejectUnauthorized: true } : undefined,
     });
 
