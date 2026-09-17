@@ -1,0 +1,7 @@
+{
+  "name": "Nagpur Hackathon Registration Bot",
+  "description": "Headless Google Form Engine for Next.js - Visual multi-step SaaS builder with TiDB persistence, Google Form schema ingestion engine, and WYSIWYG studio.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
