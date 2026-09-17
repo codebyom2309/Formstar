@@ -1,0 +1,7 @@
+{
+  "name": "Nagpur Hackathon Registration Bot",
+  "description": "Official registration portal for HackX 2026: Hackathon for Advanced Coding & Knowledge eXchange, featuring multi-step team enrollment, automated role allocation, and instant confirmation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

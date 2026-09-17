@@ -8,7 +8,11 @@ import {
   CanonicalQuestionType,
   QuestionSemanticRole,
   CanonicalComponentType,
+  WebsiteContent,
+  DynamicInfoSection,
+  HeroMetric,
 } from "../types/canonicalExperience";
+import { extractRichDescriptionData } from "./descriptionExtractor";
 
 /**
  * Resolves the canonical component type from question type, role, options, and category
@@ -206,6 +210,66 @@ export function convertConfigToExperience(
   else if (catStr === "survey" || catStr === "feedback") rulesLabel = "Survey Overview";
   else if (catStr === "application") rulesLabel = "Application Guidelines";
 
+  // Generate fallback websiteContent for forms without AI analysis
+  const estimatedTime = allFields.length > 15 ? "~10 min" : allFields.length > 6 ? "~5 min" : "~2 min";
+  const requiredCount = allFields.filter(f => f.required).length;
+  const richDesc = extractRichDescriptionData(desc);
+
+  const ctaLabelMap: Record<string, string> = {
+    quiz: "Start Assessment", assessment: "Begin Evaluation",
+    survey: "Take Survey", feedback: "Share Feedback",
+    hackathon: "Register Your Team", registration: "Register Now",
+    application: "Apply Now", contact: "Send Message", custom: "Get Started",
+  };
+
+  const fallbackInfoSections: DynamicInfoSection[] = [{
+    id: "info_instructions",
+    type: "instructions",
+    title: category === "quiz" ? "Assessment Guidelines" : "How to Complete",
+    icon: "book-open",
+    items: [
+      { title: "Read Carefully", description: "Review each section before submitting your responses" },
+      { title: "Required Fields", description: "Fields marked with * are mandatory and must be completed" },
+      { title: "Review & Submit", description: "Verify your answers on the final screen before submission" },
+    ],
+  }];
+
+  // Add rich extracted sections (Resource Persons, custom Rating Scale, Dates/Schedule)
+  for (const rSec of richDesc.dynamicSections) {
+    fallbackInfoSections.push(rSec);
+  }
+
+  if (fallbackInfoSections.every(s => s.type !== "rating_guide") && (catStr === "feedback" || catStr === "survey")) {
+    fallbackInfoSections.push({
+      id: "info_rating",
+      type: "rating_guide",
+      title: "Rating Scale Guide",
+      icon: "star",
+      items: [
+        { title: "1 — Poor", description: "Significantly below expectations" },
+        { title: "3 — Good", description: "Meets expectations" },
+        { title: "5 — Excellent", description: "Outstanding, exceeds expectations" },
+      ],
+    });
+  }
+
+  const fallbackHeroMetrics: HeroMetric[] = [...richDesc.heroMetrics];
+  fallbackHeroMetrics.push(
+    { label: "Questions", value: String(allFields.length), detail: `${requiredCount} required` },
+    { label: "Est. Time", value: estimatedTime, detail: "Average completion" },
+    { label: "Sections", value: String(sections.length), detail: "Logical groups" }
+  );
+
+  const websiteContent: WebsiteContent = {
+    heroTitle: title,
+    heroSubtitle: richDesc.cleanSubtitle || desc || `Complete this ${category.replace(/_/g, " ")} form`,
+    heroBadge: catStr === "quiz" ? "Knowledge Assessment" : catStr === "feedback" ? "Feedback Form" : catStr === "hackathon" ? "Hackathon Registration" : "Official Form",
+    heroMetrics: fallbackHeroMetrics,
+    ctaLabel: ctaLabelMap[category] || "Get Started",
+    dynamicInfoSections: fallbackInfoSections,
+    footerTagline: `Powered by NextForm — ${title}`,
+  };
+
   return {
     schemaVersion: "1.0",
     source: {
@@ -230,9 +294,9 @@ export function convertConfigToExperience(
     },
     overview: {
       title,
-      subtitle: desc ? desc.slice(0, 120) + (desc.length > 120 ? "..." : "") : "Digital Submission Experience",
+      subtitle: richDesc.cleanSubtitle || desc || "Digital Submission Experience",
       purpose: `Collect responses for ${title}`,
-      audience: "Registered respondents",
+      audience: richDesc.extractedAudience ? `${richDesc.extractedAudience}s and participants` : "Registered respondents",
       estimatedCompletionTime: allFields.length > 15 ? "~8-10 minutes" : "~3-5 minutes",
       rulesLabel,
       instructions: [
@@ -240,10 +304,12 @@ export function convertConfigToExperience(
         "Ensure all required fields are accurately filled.",
         "Verify your contact information to receive confirmation.",
       ],
-      requirements: [
-        "Active Internet Connection",
-        category === "quiz" ? "Valid Student ID / Roll Number" : "Valid Email Address",
-      ],
+      requirements: richDesc.extractedDeadline
+        ? [`Submit before ${richDesc.extractedDeadline}`, "Active Internet Connection"]
+        : [
+            "Active Internet Connection",
+            category === "quiz" ? "Valid Student ID / Roll Number" : "Valid Email Address",
+          ],
     },
     sections,
     theme: {
@@ -254,14 +320,15 @@ export function convertConfigToExperience(
       borderRadius: (config.theme?.borderRadius as any) || "rounded-xl",
       fontFamily: config.theme?.fontFamily || "Plus Jakarta Sans",
     },
+    websiteContent,
     aiMetadata: {
-      provider: "groq",
-      model: "openai/gpt-oss-20b",
-      latencyMs: 310,
+      provider: "fallback",
+      model: "deterministic-adapter",
+      latencyMs: 5,
       confidence,
       reasoningSummary: `Derived from structural form elements (${allFields.length} questions, ${sections.length} sections).`,
       analyzedAt: new Date().toISOString(),
-      promptVersion: "2.0",
+      promptVersion: "3.0",
     },
   };
 }

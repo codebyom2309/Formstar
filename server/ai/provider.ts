@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { GoogleGenAI } from "@google/genai";
 import { CanonicalExperienceSchema } from "../../src/types/canonicalExperience";
 import { validateAndRepairExperience } from "./validator";
+import { extractRichDescriptionData } from "../../src/lib/descriptionExtractor";
 
 export interface FormAnalysisRequest {
   rawForm: any;
@@ -120,6 +121,24 @@ OVERVIEW & COMPLETION PLANNING:
 - "instructions": 3-4 clear instructions derived from the form's actual purpose
 - "completion": { "headline": "string", "message": "string", "categoryTailoredNote": "string" }
 
+WEBSITE CONTENT GENERATION (CRITICAL):
+You must also generate "websiteContent" — personalized landing page content that transforms this form into a complete mini-website experience.
+- "heroTitle": A compelling, specific headline derived from the form's actual purpose (NOT generic)
+- "heroSubtitle": 1-2 sentence description explaining what this form is about
+- "heroBadge": Short badge text (e.g. "Official Registration", "Quick Survey", "Knowledge Assessment")
+- "heroMetrics": 2-4 quick-glance metric cards derived from the form content (e.g. {"label": "Questions", "value": "15", "detail": "All required"}, {"label": "Time", "value": "~5 min", "detail": "Average completion"})
+- "ctaLabel": Action button text (e.g. "Start Assessment", "Register Now", "Submit Feedback")
+- "dynamicInfoSections": An array of 2-5 contextual info sections based on the form type. Each section has:
+  - "type": "overview" | "instructions" | "eligibility" | "dates" | "rating_guide" | "steps" | "tips" | "contacts" | "privacy" | "guidelines" | "scoring" | "faq"
+  - "title": Section title
+  - "icon": lucide icon name
+  - "items": Array of { "title": "string", "description": "string" }
+  IMPORTANT: Only generate sections that are RELEVANT to this specific form. A feedback form needs a "rating_guide", not "eligibility". A quiz needs "scoring", not "dates".
+- "footerTagline": Short tagline for the form footer
+
+SOURCE CONTENT EXTRACTION DIRECTIVE (CRITICAL):
+If the original form contains guidelines, instructions, descriptions, rating scale definitions, deadlines, eligibility criteria, resource persons, contact info, or ANY structured information in its title, description, section headers, or question help text — you MUST EXTRACT AND USE THAT INFORMATION in the websiteContent and overview. Do NOT replace it with generic boilerplate content. The original form creator's words are the source of truth.
+
 MANDATORY TECHNICAL PRESERVATION:
 Every question MUST retain its exact "googleEntryId" (e.g. "entry.182736452") so that submissions route to Google Forms seamlessly.
 
@@ -141,6 +160,23 @@ Output strictly valid JSON matching this schema:
     "requireReviewBeforeSubmit": true,
     "questionDensity": "compact" | "comfortable" | "spacious",
     "stickyNavigation": true
+  },
+  "websiteContent": {
+    "heroTitle": "string",
+    "heroSubtitle": "Comprehensive 2-3 sentence overview without truncation",
+    "heroBadge": "string",
+    "heroMetrics": [{"label": "string", "value": "string", "detail": "string"}],
+    "ctaLabel": "string",
+    "dynamicInfoSections": [
+      {
+        "id": "info_1",
+        "type": "overview" | "instructions" | "eligibility" | "dates" | "rating_guide" | "steps" | "tips" | "contacts" | "privacy" | "guidelines" | "scoring" | "resources" | "faq",
+        "title": "string",
+        "icon": "string",
+        "items": [{"title": "string", "description": "string"}]
+      }
+    ],
+    "footerTagline": "string"
   },
   "overview": {
     "title": "string",
@@ -196,20 +232,53 @@ Output strictly valid JSON matching this schema:
   }
 }`;
 
+    // Build enriched context for the AI
+    const sectionHeaders = rawForm?.sectionHeaders || [];
+    const sectionHeadersText = sectionHeaders.length > 0
+      ? `\nForm Section Headers (${sectionHeaders.length} sections):\n${sectionHeaders.map((sh: any, i: number) => `  Section ${i + 1}: "${sh.title}"${sh.description ? ` — Description: "${sh.description}"` : ""}`).join("\n")}`
+      : "";
+
+    const fieldsWithContext = rawFields.map((f: any) => {
+      const obj: any = {
+        entryCode: f.entryCode || `entry.${f.entryId}`,
+        label: f.label,
+        type: f.type,
+        required: f.required,
+        options: f.options,
+      };
+      if (f.helpText) obj.helpText = f.helpText;
+      if (f.scaleMinLabel) obj.scaleMinLabel = f.scaleMinLabel;
+      if (f.scaleMaxLabel) obj.scaleMaxLabel = f.scaleMaxLabel;
+      return obj;
+    });
+
+    const richDesc = extractRichDescriptionData(rawDesc);
+    const extractedDetails = [
+      richDesc.extractedDate ? `Event Date: ${richDesc.extractedDate}` : "",
+      richDesc.extractedDeadline ? `Deadline: ${richDesc.extractedDeadline}` : "",
+      richDesc.extractedVenue ? `Venue: ${richDesc.extractedVenue}` : "",
+      richDesc.extractedFee ? `Fee: ${richDesc.extractedFee}` : "",
+      richDesc.extractedAudience ? `Target Audience: ${richDesc.extractedAudience}` : "",
+      richDesc.ratingScaleItems.length > 0 ? `Rating Scale: ${richDesc.ratingScaleItems.map(r => r.title).join(" | ")}` : "",
+      richDesc.dynamicSections.find(s => s.type === "resources")
+        ? `Resource Persons / Dignitaries (${richDesc.dynamicSections.find(s => s.type === "resources")!.items.length}):\n${richDesc.dynamicSections.find(s => s.type === "resources")!.items.map(i => `  • ${i.title} — ${i.description}`).join("\n")}`
+        : "",
+    ].filter(Boolean).join("\n");
+
     const userPrompt = `Google Form Title: ${rawTitle}
-Description: ${rawDesc}
+Description: ${richDesc.cleanedText || rawDesc || "(No description provided)"}
+${extractedDetails ? `\nPRE-PARSED SOURCE METADATA:\n${extractedDetails}\n` : ""}Total Questions: ${rawFields.length}
+Required Questions: ${rawFields.filter((f: any) => f.required).length}${sectionHeadersText}
+
 Extracted Fields (${rawFields.length} total):
-${JSON.stringify(
-  rawFields.map((f: any) => ({
-    entryCode: f.entryCode || `entry.${f.entryId}`,
-    label: f.label,
-    type: f.type,
-    required: f.required,
-    options: f.options,
-  })),
-  null,
-  2
-)}`;
+${JSON.stringify(fieldsWithContext, null, 2)}
+
+CRITICAL EXTRACTION MANDATE:
+1. You MUST generate "websiteContent" at the top level of the JSON response.
+2. If the form description has Resource Persons / Dignitaries, you MUST create a dynamicInfoSection with type "resources", title "Resource Persons & Dignitaries", icon "award", and all the persons listed!
+3. If the form description has a Rating Scale, you MUST create a dynamicInfoSection with type "rating_guide" and the exact rating options from the form!
+4. If the form description has an Event Date or Deadline, you MUST include it in heroMetrics and as a "dates" dynamicInfoSection!
+5. In "heroSubtitle": Write a comprehensive, complete summary of the form's purpose (2-3 sentences). Do NOT truncate or cut off words.`;
 
     // 1. Try Gemini first if configured
     if (this.geminiClient) {
@@ -273,7 +342,7 @@ ${JSON.stringify(
             ],
             response_format: { type: "json_object" },
             temperature: 0.2,
-            max_tokens: 3000,
+            max_tokens: 6000,
           }),
         });
 
@@ -294,7 +363,7 @@ ${JSON.stringify(
               ],
               response_format: { type: "json_object" },
               temperature: 0.2,
-              max_tokens: 3000,
+              max_tokens: 6000,
             }),
           });
         }

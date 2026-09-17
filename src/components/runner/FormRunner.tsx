@@ -824,7 +824,7 @@ export const FormRunner: React.FC<FormRunnerProps> = ({
   }, [personality]);
 
   return (
-    <div className="w-full max-w-3xl mx-auto px-3.5 sm:px-5 py-4 sm:py-6 md:py-8 space-y-6">
+    <div className="w-full max-w-3xl mx-auto px-3 sm:px-5 py-4 sm:py-6 md:py-8 space-y-5 sm:space-y-6 max-w-[100vw] overflow-x-hidden">
       {/* Hidden file input for real Cloudinary / file uploads */}
       <input
         type="file"
@@ -835,17 +835,17 @@ export const FormRunner: React.FC<FormRunnerProps> = ({
       />
 
       {/* Runner Top Bar: Form Header with Logo, Title, and Overview & Rules button */}
-      <div className="bg-white/85 backdrop-blur-xl rounded-3xl p-5 sm:p-7 border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] ring-1 ring-slate-900/5 space-y-6">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3.5">
+      <div className="bg-white/85 backdrop-blur-xl rounded-2xl sm:rounded-3xl p-4 sm:p-7 border border-white/80 shadow-[0_8px_30px_rgb(0,0,0,0.04)] ring-1 ring-slate-900/5 space-y-4 sm:space-y-6 overflow-hidden">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0 flex-1">
             {meta.logoUrl ? (
               <img
                 src={meta.logoUrl}
                 alt="Logo"
-                className="w-12 h-12 rounded-2xl border border-slate-200 object-contain p-1 shadow-2xs"
+                className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl border border-slate-200 object-contain p-1 shadow-2xs shrink-0"
               />
             ) : (
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-slate-900 to-indigo-900 text-white flex items-center justify-center font-black text-sm tracking-wider shadow-2xs">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl sm:rounded-2xl bg-gradient-to-tr from-slate-900 to-indigo-900 text-white flex items-center justify-center font-black text-xs sm:text-sm tracking-wider shadow-2xs shrink-0">
                 {(meta.title || "Form")
                   .split(/\s+/)
                   .filter(Boolean)
@@ -854,19 +854,22 @@ export const FormRunner: React.FC<FormRunnerProps> = ({
                   .join("") || "NF"}
               </div>
             )}
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                  {meta.title || "NextForm"}
-                </h1>
+            <div className="min-w-0 flex-1">
+              <h1 className="text-base sm:text-xl md:text-2xl font-black text-slate-900 tracking-tight truncate">
+                {meta.title || "NextForm"}
+              </h1>
+              <p className="text-[11px] sm:text-xs text-slate-500 font-medium mt-0.5 truncate">
+                {meta.description?.slice(0, 60) || `${experience.form.category.replace(/_/g, " ").toUpperCase()} Experience`}
+              </p>
+              {/* Badges row — visible on larger screens */}
+              <div className="hidden sm:flex items-center gap-1.5 mt-2 flex-wrap">
                 {isSandbox && (
                   <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 bg-purple-100 text-purple-700 rounded-md">
                     Sandbox
                   </span>
                 )}
-                {/* Personality Badge */}
                 {personalityBadge && (
-                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg text-[10px] font-bold tracking-wide uppercase border ${personalityBadge.classes}`}>
+                  <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold tracking-wide uppercase border ${personalityBadge.classes}`}>
                     {personalityBadge.icon}
                     <span>{personalityBadge.label}</span>
                   </span>
@@ -880,19 +883,16 @@ export const FormRunner: React.FC<FormRunnerProps> = ({
                   </span>
                 )}
               </div>
-              <p className="text-xs text-slate-500 font-medium mt-0.5">
-                {meta.description?.slice(0, 75) || `${experience.form.category.toUpperCase()} Experience`}
-              </p>
             </div>
           </div>
 
           <button
             type="button"
             onClick={() => setIsOverviewOpen(true)}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100/90 hover:bg-slate-200/90 hover:text-slate-900 transition-all shadow-[0_1.5px_2px_rgba(0,0,0,0.04),inset_0_1px_0_rgba(255,255,255,0.8)] active:translate-y-0.5 active:scale-[0.98]"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-2 rounded-xl text-xs font-bold text-slate-700 bg-slate-100/90 hover:bg-slate-200/90 hover:text-slate-900 transition-all active:scale-[0.97] shrink-0"
           >
             <BookOpen className="w-3.5 h-3.5 text-sky-500" />
-            <span>{experience.overview?.rulesLabel || "Overview & Instructions"}</span>
+            <span className="hidden sm:inline">{experience.overview?.rulesLabel || "Overview"}</span>
           </button>
         </div>
 

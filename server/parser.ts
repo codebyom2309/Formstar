@@ -1,4 +1,10 @@
 import { FormConfig, FormStep, FormCard, FormField } from "../src/types";
+import { extractRichDescriptionData, ExtractedDescriptionData } from "../src/lib/descriptionExtractor";
+
+export interface SectionHeader {
+  title: string;
+  description: string;
+}
 
 export interface ParsedGoogleFormResult {
   success: boolean;
@@ -17,6 +23,8 @@ export interface ParsedGoogleFormResult {
     totalSteps: number;
     totalCards: number;
   };
+  sectionHeaders: SectionHeader[];
+  structuredDescription?: ExtractedDescriptionData;
   flatFields: {
     entryId: string;
     entryCode: string;
@@ -24,6 +32,9 @@ export interface ParsedGoogleFormResult {
     type: string;
     required: boolean;
     options?: string[];
+    helpText?: string;
+    scaleMinLabel?: string;
+    scaleMaxLabel?: string;
   }[];
   config: FormConfig;
 }
@@ -88,10 +99,19 @@ export async function parseGoogleForm(rawUrl: string): Promise<ParsedGoogleFormR
     throw new Error("Failed to parse the Google Form schema payload.");
   }
 
-  // Form metadata
+  // Form metadata — preserve description even when it partially matches title
   const formTitle = (rawData[1]?.[8] || rawData[1]?.[0] || "Untitled Google Form").toString().trim();
-  const formDescription =
-    rawData[1]?.[0] && rawData[1]?.[0] !== formTitle ? rawData[1]?.[0].toString().trim() : "";
+  const rawDescCandidate = rawData[1]?.[0] ? rawData[1][0].toString().trim() : "";
+  // Also check index [12] for longer description field and [15] for confirmation message
+  const altDesc = rawData[1]?.[12] ? rawData[1][12].toString().trim() : "";
+  const rawDesc = altDesc || (rawDescCandidate && rawDescCandidate !== formTitle ? rawDescCandidate : "");
+  // Sanitize raw label prefixes like "FORM DESCRIPTION"
+  const formDescription = rawDesc
+    .replace(/^FORM\s+DESCRIPTION\s*:?/i, "")
+    .replace(/^FORM\s+DETAILS\s*:?/i, "")
+    .replace(/^DESCRIPTION\s*:?/i, "")
+    .trim();
+  const structuredDescription = extractRichDescriptionData(formDescription);
 
   // Derive target action URL for submissions (formResponse)
   const targetActionUrl = finalUrl.replace(/\/(viewform|edit|closedform)(\?.*)?$/, "/formResponse");
@@ -126,6 +146,7 @@ export async function parseGoogleForm(rawUrl: string): Promise<ParsedGoogleFormR
   // -------------------------------------------------------------
   const steps: FormStep[] = [];
   const flatFields: ParsedGoogleFormResult["flatFields"] = [];
+  const sectionHeaders: SectionHeader[] = [];
 
   let currentStep: FormStep = {
     id: "step-1",
@@ -156,6 +177,8 @@ export async function parseGoogleForm(rawUrl: string): Promise<ParsedGoogleFormR
     if (typeCode === 8) {
       stepCount++;
       cardCount = 1;
+      // Capture section headers for AI context
+      sectionHeaders.push({ title: cleanTitle || `Section ${stepCount}`, description: description || "" });
       currentStep = {
         id: `step-${stepCount}`,
         title: cleanTitle ? `Step ${stepCount}: ${cleanTitle}` : `Step ${stepCount}`,
@@ -216,6 +239,21 @@ export async function parseGoogleForm(rawUrl: string): Promise<ParsedGoogleFormR
         fieldType = "text";
       }
 
+      // Extract scale labels for linear scale questions (type 5)
+      let scaleMinLabel: string | undefined;
+      let scaleMaxLabel: string | undefined;
+      if (typeCode === 5 && sub[1] && Array.isArray(sub[1])) {
+        // Scale labels are in element[4][x][3] structure or options array
+        const scaleOpts = sub[1];
+        if (scaleOpts.length >= 2) {
+          // Try extracting boundary labels from option metadata
+          const firstOpt = scaleOpts[0];
+          const lastOpt = scaleOpts[scaleOpts.length - 1];
+          if (Array.isArray(firstOpt) && firstOpt[1]) scaleMinLabel = firstOpt[1].toString().trim();
+          if (Array.isArray(lastOpt) && lastOpt[1]) scaleMaxLabel = lastOpt[1].toString().trim();
+        }
+      }
+
       const field: FormField = {
         id: `f_${entryIdNum}`,
         entryCode,
@@ -237,6 +275,9 @@ export async function parseGoogleForm(rawUrl: string): Promise<ParsedGoogleFormR
         type: field.type,
         required: field.required,
         options: field.options,
+        helpText: description || undefined,
+        scaleMinLabel,
+        scaleMaxLabel,
       });
     }
   }
@@ -302,6 +343,8 @@ export async function parseGoogleForm(rawUrl: string): Promise<ParsedGoogleFormR
       totalSteps: normalizedSteps.length,
       totalCards,
     },
+    sectionHeaders,
+    structuredDescription,
     flatFields,
     config,
   };

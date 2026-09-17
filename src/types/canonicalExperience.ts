@@ -234,6 +234,58 @@ export interface AIAnalysisMetadata {
   tokensUsed?: number;
 }
 
+// ============================================================================
+// WEBSITE CONTENT — AI-Generated Personalized Landing Page Content
+// ============================================================================
+
+export interface HeroMetric {
+  label: string;
+  value: string;
+  detail?: string;
+}
+
+export type DynamicInfoSectionType =
+  | "overview"
+  | "instructions"
+  | "eligibility"
+  | "dates"
+  | "rating_guide"
+  | "steps"
+  | "tips"
+  | "contacts"
+  | "privacy"
+  | "post_submission"
+  | "guidelines"
+  | "resources"
+  | "faq"
+  | "scoring"
+  | "custom";
+
+export interface DynamicInfoSectionItem {
+  title: string;
+  description: string;
+  icon?: string;
+}
+
+export interface DynamicInfoSection {
+  id: string;
+  type: DynamicInfoSectionType;
+  title: string;
+  icon?: string;
+  items: DynamicInfoSectionItem[];
+}
+
+export interface WebsiteContent {
+  heroTitle: string;
+  heroSubtitle: string;
+  heroBadge?: string;
+  heroMetrics?: HeroMetric[];
+  ctaLabel?: string;
+  dynamicInfoSections?: DynamicInfoSection[];
+  footerTagline?: string;
+  footerOrganization?: string;
+}
+
 export interface CanonicalExperienceSchema {
   schemaVersion: "1.0";
   source: {
@@ -265,5 +317,6 @@ export interface CanonicalExperienceSchema {
   conditionalRules?: ExperienceConditionalRule[];
   theme: ExperienceTheme;
   completion?: ExperienceCompletion;
+  websiteContent?: WebsiteContent;
   aiMetadata: AIAnalysisMetadata;
 }

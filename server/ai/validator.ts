@@ -9,7 +9,11 @@ import {
   QuestionSemanticRole,
   ExperienceConditionalRule,
   ExperienceCompletion,
+  WebsiteContent,
+  DynamicInfoSection,
+  HeroMetric,
 } from "../../src/types/canonicalExperience";
+import { extractRichDescriptionData } from "../../src/lib/descriptionExtractor";
 
 /**
  * Validates and repairs the AI output to ensure complete correctness,
@@ -328,7 +332,13 @@ export function validateAndRepairExperience(
   }
 
   const title = aiOutput?.form?.title || rawTitle;
-  const description = aiOutput?.form?.description || rawDesc;
+  const rawCleanDesc = (aiOutput?.form?.description || rawDesc || "")
+    .replace(/^FORM\s+DESCRIPTION\s*:?/i, "")
+    .replace(/^FORM\s+DETAILS\s*:?/i, "")
+    .replace(/^DESCRIPTION\s*:?/i, "")
+    .trim();
+  const description = rawCleanDesc || aiOutput?.form?.description || rawDesc;
+  const richDesc = extractRichDescriptionData(description);
 
   // Completion experience
   const completion: ExperienceCompletion = {
@@ -356,6 +366,158 @@ export function validateAndRepairExperience(
   const conditionalRules: ExperienceConditionalRule[] = Array.isArray(aiOutput?.conditionalRules)
     ? aiOutput.conditionalRules.filter((r: any) => r && r.googleEntryId && r.action && Array.isArray(r.targetFieldIds))
     : [];
+
+  // ---------------------------------------------------------------
+  // 6. Validate and repair websiteContent using AI output + rich extractor
+  // ---------------------------------------------------------------
+  const aiWebContent = aiOutput?.websiteContent;
+  const requiredCount = rawFields.filter((f: any) => f.required).length;
+  const estimatedTime = rawFields.length > 15 ? "~10 min" : rawFields.length > 6 ? "~5 min" : "~2 min";
+
+  // Generate smart fallback hero metrics based on form type and extracted data
+  const fallbackMetrics: HeroMetric[] = [...richDesc.heroMetrics];
+  fallbackMetrics.push(
+    { label: "Questions", value: String(rawFields.length), detail: `${requiredCount} required` },
+    { label: "Est. Time", value: estimatedTime, detail: "Average completion" }
+  );
+
+  if (category === "quiz" || category === "assessment" || category === "examination") {
+    fallbackMetrics.push({ label: "Type", value: "Assessment", detail: "Timed evaluation" });
+  } else if (category === "hackathon" || category === "competition") {
+    fallbackMetrics.push({ label: "Format", value: "Multi-Step", detail: "Team registration" });
+  } else if (category === "survey" || category === "feedback") {
+    fallbackMetrics.push({ label: "Anonymous", value: "Yes", detail: "Responses are private" });
+  }
+
+  // Generate fallback dynamic info sections including extracted rich metadata
+  const fallbackInfoSections: DynamicInfoSection[] = [];
+  const overviewInstructions = Array.isArray(aiOutput?.overview?.instructions) && aiOutput.overview.instructions.length > 0
+    ? aiOutput.overview.instructions
+    : ["Answer all required questions marked with an asterisk (*)", "Review your submissions before final submit", "Your responses sync directly to the official database"];
+
+  fallbackInfoSections.push({
+    id: "info_instructions",
+    type: "instructions",
+    title: category === "quiz" ? "Assessment Guidelines" : category === "feedback" ? "How to Respond" : "How to Complete",
+    icon: "book-open",
+    items: overviewInstructions.map((inst: string, i: number) => ({
+      title: `Step ${i + 1}`,
+      description: inst,
+    })),
+  });
+
+  // Add rich extracted sections (Rating Guide, Resource Persons, Schedule)
+  for (const rSec of richDesc.dynamicSections) {
+    fallbackInfoSections.push(rSec);
+  }
+
+  if (fallbackInfoSections.every(s => s.type !== "rating_guide") && (category === "feedback" || category === "survey")) {
+    fallbackInfoSections.push({
+      id: "info_rating",
+      type: "rating_guide",
+      title: "Rating Scale Guide",
+      icon: "star",
+      items: [
+        { title: "1 — Poor", description: "Significantly below expectations" },
+        { title: "2 — Fair", description: "Below expectations, needs improvement" },
+        { title: "3 — Good", description: "Meets expectations" },
+        { title: "4 — Very Good", description: "Above expectations" },
+        { title: "5 — Excellent", description: "Outstanding, exceeds expectations" },
+      ],
+    });
+  }
+
+  if (category === "quiz" || category === "assessment") {
+    fallbackInfoSections.push({
+      id: "info_scoring",
+      type: "scoring",
+      title: "Scoring Information",
+      icon: "award",
+      items: [
+        { title: "Answer Carefully", description: "Each question contributes to your overall score" },
+        { title: "Review Before Submit", description: "You can navigate between questions before final submission" },
+      ],
+    });
+  }
+
+  // Validate AI-generated websiteContent or use fallbacks
+  const ctaLabelMap: Record<string, string> = {
+    quiz: "Start Assessment", assessment: "Begin Evaluation", examination: "Start Exam",
+    survey: "Take Survey", feedback: "Share Feedback", poll: "Vote Now",
+    registration: "Register Now", event_registration: "Register Now", hackathon: "Register Your Team",
+    application: "Apply Now", job_application: "Submit Application",
+    contact: "Send Message", custom: "Get Started",
+  };
+
+  // Determine heroSubtitle without any truncation
+  const candidateHeroSub = aiWebContent?.heroSubtitle?.trim();
+  const isBadHeroSub = !candidateHeroSub || candidateHeroSub.startsWith("FORM DESCRIPTION") || candidateHeroSub.length < 15;
+  const heroSubtitle = (!isBadHeroSub && candidateHeroSub)
+    ? candidateHeroSub
+    : (richDesc.cleanSubtitle || description || `Complete this ${category.replace(/_/g, " ")} form`);
+
+  // Build validated dynamic info sections, merging rich extracted sections if omitted by AI
+  let validatedInfoSections: DynamicInfoSection[] = [];
+  if (Array.isArray(aiWebContent?.dynamicInfoSections) && aiWebContent.dynamicInfoSections.length > 0) {
+    validatedInfoSections = aiWebContent.dynamicInfoSections.map((sec: any, i: number) => ({
+      id: sec.id || `info_${i + 1}`,
+      type: sec.type || "custom",
+      title: sec.title || `Information`,
+      icon: sec.icon || "info",
+      items: Array.isArray(sec.items) ? sec.items.map((item: any) => ({
+        title: item.title || "",
+        description: item.description || "",
+        icon: item.icon,
+      })) : [],
+    }));
+
+    // Merge any extracted sections that the AI missed (e.g. Resource Persons or specific Rating Scale)
+    for (const rSec of richDesc.dynamicSections) {
+      const existing = validatedInfoSections.find(
+        (s) =>
+          s.type === rSec.type ||
+          (rSec.type === "resources" && (s.type === "contacts" || /resource|dignit|speaker|guest/i.test(s.title))) ||
+          (rSec.type === "rating_guide" && /rating|scale/i.test(s.title)) ||
+          (rSec.type === "dates" && /date|schedule/i.test(s.title))
+      );
+      if (!existing) {
+        validatedInfoSections.push(rSec);
+      } else if (rSec.type === "rating_guide" && richDesc.ratingScaleItems.length > 0) {
+        // Prefer explicit rating scale from form description over generic 1-5
+        existing.items = rSec.items;
+        existing.type = "rating_guide";
+      } else if (rSec.type === "resources" && rSec.items.length > 0) {
+        // Ensure rich titles and role descriptions are preserved
+        existing.items = rSec.items;
+        existing.type = "resources";
+        existing.title = rSec.title;
+      }
+    }
+  } else {
+    validatedInfoSections = fallbackInfoSections;
+  }
+
+  // Ensure heroMetrics includes extracted date/deadline/fee
+  let validatedHeroMetrics: HeroMetric[] = (Array.isArray(aiWebContent?.heroMetrics) && aiWebContent.heroMetrics.length > 0)
+    ? aiWebContent.heroMetrics.map((m: any) => ({ label: m.label || "", value: m.value || "", detail: m.detail }))
+    : fallbackMetrics;
+
+  for (const metric of richDesc.heroMetrics) {
+    if (!validatedHeroMetrics.some(m => m.label.toLowerCase() === metric.label.toLowerCase())) {
+      validatedHeroMetrics.unshift(metric);
+    }
+  }
+
+  const websiteContent: WebsiteContent = {
+    heroTitle: aiWebContent?.heroTitle || title,
+    heroSubtitle,
+    heroBadge: aiWebContent?.heroBadge || (category === "quiz" ? "Knowledge Assessment" : category === "feedback" ? "Feedback Form" : category === "hackathon" ? "Hackathon Registration" : "Official Form"),
+    heroMetrics: validatedHeroMetrics,
+    ctaLabel: aiWebContent?.ctaLabel || ctaLabelMap[category] || "Get Started",
+    dynamicInfoSections: validatedInfoSections,
+    footerTagline: aiWebContent?.footerTagline || `Powered by NextForm — ${title}`,
+    footerOrganization: aiWebContent?.footerOrganization,
+  };
 
   return {
     schemaVersion: "1.0",
@@ -388,26 +550,20 @@ export function validateAndRepairExperience(
     overview: {
       title: aiOutput?.overview?.title || title,
       subtitle:
-        aiOutput?.overview?.subtitle ||
-        (description ? description.slice(0, 150) : "Digital Form Submission Experience"),
+        (!isBadHeroSub && candidateHeroSub)
+          ? candidateHeroSub
+          : (richDesc.cleanSubtitle || description || "Digital Form Submission Experience"),
       purpose: aiOutput?.overview?.purpose || `Collect and process verified responses for ${title}`,
-      audience: aiOutput?.overview?.audience || "Registered respondents and participants",
+      audience: aiOutput?.overview?.audience || (richDesc.extractedAudience ? `${richDesc.extractedAudience}s and participants` : "Registered respondents and participants"),
       estimatedCompletionTime:
         aiOutput?.overview?.estimatedCompletionTime ||
         (rawFields.length > 15 ? "~8–12 minutes" : rawFields.length > 6 ? "~4–6 minutes" : "~1–3 minutes"),
       rulesLabel,
-      instructions:
-        Array.isArray(aiOutput?.overview?.instructions) && aiOutput.overview.instructions.length > 0
-          ? aiOutput.overview.instructions
-          : [
-              "Please answer all required questions marked with an asterisk (*).",
-              "Review your submissions thoroughly on the final verification screen.",
-              "Submissions are sent directly to the official Google Form database.",
-            ],
+      instructions: overviewInstructions,
       requirements:
         Array.isArray(aiOutput?.overview?.requirements) && aiOutput.overview.requirements.length > 0
           ? aiOutput.overview.requirements
-          : ["Stable internet connection", "Valid contact details"],
+          : (richDesc.extractedDeadline ? [`Submit before ${richDesc.extractedDeadline}`, "Stable internet connection"] : ["Stable internet connection", "Valid contact details"]),
       tips: aiOutput?.overview?.tips || ["You can navigate between sections at any time before submitting."],
       warnings: aiOutput?.overview?.warnings,
     },
@@ -424,6 +580,7 @@ export function validateAndRepairExperience(
       density: "comfortable",
     },
     completion,
+    websiteContent,
     aiMetadata: {
       provider: "groq",
       model: meta.model,
@@ -433,7 +590,7 @@ export function validateAndRepairExperience(
         aiOutput?.form?.reasoningSummary ||
         `Classified as ${category.toUpperCase()} using semantic field analysis.`,
       analyzedAt: new Date().toISOString(),
-      promptVersion: "2.5",
+      promptVersion: "3.1",
     },
   };
 }
